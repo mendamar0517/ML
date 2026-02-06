@@ -3,14 +3,9 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
-# =========================
-# Constants
-# =========================
 UNIT_WORD = r"(?:ТООТ|Т|№|NO\.?|NO|ТОТ|ТОО|ТООТ\.?|TOOT|TOOT\.?)"
 SEP_CHARS = r'[.\\\/\-#\$\^&\*\?`~:;<>|]'
-SEP = rf"(?:{SEP_CHARS}|\s+)"
 
-# Дүүргийн нэрсийн латин болон кирилл хувилбаруудыг нэгтгэв
 CANON_DISTRICTS = {
     "БАЯНЗҮРХ": [
         "БАЯНЗҮРХ", "БАНЗҮР", "БАЯНЗҮР", "БЗД", "БЗ", "БАНЗҮРХ", "БАЯНЗУРХ", "БАЯНЗҮРХД",
@@ -54,19 +49,14 @@ DISTRICT_MIN_SCORE = 0.85
 
 
 def normalize_address(text: str) -> str:
-    if text is None: return ""
-    # Кирилл болон Латин холимог байж болох тул зөвхөн том үсэг болгоно
-    s = str(text).strip().upper()
-    s = s.replace("\n", " ").replace("\r", " ")
+    if not text:
+        return ""
+    s = str(text).upper().strip()
+    s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
     s = unicodedata.normalize("NFKC", s)
-    s = s.replace("\t", " ")
     s = re.sub(r"[，,]+", " ", s)
 
-    # Хорооны стандартууд (Кирилл + Латин)
-    s = re.sub(r"(\d+)\s*-\s*Р", r"\1-Р", s)
-    s = re.sub(r"(\d+)\s*Р\b", r"\1-Р", s)
-
-    # ТООТ-г наах
+    # "56Т" -> "56 Т" , "56ТООТ" -> "56 ТООТ" (тоот наалдах)
     s = re.sub(rf"(\d+)\s*({UNIT_WORD})\b", r"\1 \2", s)
 
     s = re.sub(r"\s+", " ", s).strip()
@@ -75,135 +65,143 @@ def normalize_address(text: str) -> str:
 
 def _find_district(text: str):
     t = text.upper()
-    # 1. Exact match (Латин ба Кирилл алиасуудыг шалгана)
+
+    # exact
     for canon, aliases in CANON_DISTRICTS.items():
-        for alias in aliases:
-            if re.search(rf"\b{alias}\b", t):
+        for a in aliases:
+            if re.search(rf"\b{re.escape(a)}\b", t):
                 return canon
 
-    # 2. Fuzzy match
-    best_match = None
-    max_score = 0
-    words = t.split()
-    for word in words:
-        clean_word = re.sub(r'[^\w]', '', word)
-        if len(clean_word) < 2: continue
-
+    # fuzzy
+    best, best_score = None, 0.0
+    for w in t.split():
+        w2 = re.sub(r"[^\w]", "", w)
+        if len(w2) < 2:
+            continue
         for canon, aliases in CANON_DISTRICTS.items():
-            for alias in aliases:
-                score = SequenceMatcher(None, clean_word, alias).ratio()
-                if score > max_score and score >= DISTRICT_MIN_SCORE:
-                    max_score = score
-                    best_match = canon
-    return best_match
+            for a in aliases:
+                sc = SequenceMatcher(None, w2, a).ratio()
+                if sc > best_score and sc >= DISTRICT_MIN_SCORE:
+                    best, best_score = canon, sc
+    return best
 
 
-def _find_horoo(text: str, district_name: str):
-    """
-    Хороог кирилл болон латин хэлбэрээр хайх
-    """
-    # 1) Классик бичиглэл: 3-Р ХОРОО, 3 KHOROO, 3 HOROO, 3-R HOROO
-    m = re.search(r"(\d{1,2})\s*(?:-Р|-R)?\s*(?:ХОРОО|KHOROO|HOROO|H|Х)\b", text, re.I)
-    if m: return int(m.group(1))
+def _find_horoo(text: str, district: str):
+    # 3-Р ХОРОО / 3 KHOROO / 3 H / 3Х
+    m = re.search(r"(\d{1,2})\s*(?:-Р|-R)?\s*(?:ХОРОО|HOROO|KHOROO|Х|H)\b", text, re.I)
+    if m:
+        return int(m.group(1))
 
-    # 2) Товчилсон: 3Х, 3H
     m = re.search(r"\b(\d{1,2})\s*(?:Х|H)\b", text, re.I)
-    if m: return int(m.group(1))
+    if m:
+        return int(m.group(1))
 
-    # 3) Дүүргийн ард байгаа тоо
-    if district_name:
-        aliases = CANON_DISTRICTS.get(district_name, []) + [district_name]
-        for alias in aliases:
-            m = re.search(rf"{alias}\s*(\d{{1,2}})\b", text, re.I)
-            if m: return int(m.group(1))
+    # district-ийн дараах тоо
+    if district:
+        for a in CANON_DISTRICTS.get(district, []) + [district]:
+            m = re.search(rf"{re.escape(a)}\s*(\d{{1,2}})\b", text, re.I)
+            if m:
+                return int(m.group(1))
     return 0
 
 
-def _find_building_block(text: str, horoo: int):
-    search_text = text
-    # 1) БАЙР [ТУСГААРЛАГЧ] КОРПУС [ЗАЙ] ТООТ
-    m = re.search(rf"\b(\d{{1,5}})({SEP_CHARS})([А-ЯӨҮЁA-Z]|\d{{1,2}})\s+(\d{{1,4}})\b", search_text)
-    if m:
-        return int(m.group(1)), m.group(3), int(m.group(4)), "bair.korpus xaalga"
-
-    # 2) БАЙР+ҮСЭГ [ЗАЙ] ТООТ
-    m = re.search(rf"\b(\d{{1,5}})([А-ЯӨҮЁA-Z])\s+(\d{{1,4}})\b", search_text)
-    if m:
-        return int(m.group(1)), m.group(2), int(m.group(3)), "bair+letter xaalga"
-
-    # 3) БАЙР [ЗАЙ] ТООТ
-    m = re.search(rf"\b(\d{{1,5}})\s+(\d{{1,4}})\s*(?:{UNIT_WORD})?\b", search_text)
+def _find_building_block_fallback(text: str):
+    # 44 50 ТООТ
+    m = re.search(rf"\b(\d{{1,5}})\s+(\d{{1,4}})\s*(?:{UNIT_WORD})?\b", text)
     if m:
         return int(m.group(1)), "0", int(m.group(2)), "bair xaalga"
 
-    # 4) Зөвхөн тоот
-    m = re.search(rf"{UNIT_WORD}\s*(\d{{1,4}})\b", search_text)
+    # зөвхөн тоот
+    m = re.search(rf"(?:\b{UNIT_WORD}\b\s*(\d{{1,4}})\b|\b(\d{{1,4}})\s*{UNIT_WORD}\b)", text)
     if m:
-        return 0, "0", int(m.group(1)), "xaalga only"
+        num = m.group(1) or m.group(2)
+        return 0, "0", int(num), "xaalga only"
 
     return 0, "0", 0, "none"
 
 
 def parse_with_rules(text: str):
-    norm_text = normalize_address(text)
-    sumname = _find_district(norm_text) or ""
+    norm = normalize_address(text)
+    sumname = _find_district(norm) or ""
+    horooid = _find_horoo(norm, sumname)
 
-    # 1. Хороог олж, текстээс БҮРЭН (таслалтай нь) устгах
-    horooid = _find_horoo(norm_text, sumname)
-    content_area = norm_text
+    content = norm
 
+    # --- remove horoo phrase + horoo number ---
     if horooid > 0:
-        horoo_patterns = [
-            rf"\b{horooid}\s*(?:-Р|-R)?\s*(?:ХОРОО|KHOROO|HOROO|Х|H)\b",
-            rf"\b{horooid}(?:Х|H)\b"
-        ]
-        for pat in horoo_patterns:
-            content_area = re.sub(pat, " ", content_area, flags=re.I)
+        for hp in [
+            rf"\b{horooid}\s*(?:-Р|-R)?\s*(?:ХОРОО|HOROO|KHOROO|Х|H)\b",
+            rf"\b{horooid}(?:Х|H)\b",
+        ]:
+            content = re.sub(hp, " ", content, flags=re.I)
+        content = re.sub(rf"\b{horooid}\b", " ", content)
 
-        # Хорооны тоог таслалтай нь хамт устгах
-        content_area = re.sub(rf"\b{horooid}\b\s*,?", " ", content_area)
-
-    # 2. Дүүргийн нэр болон Хотын нэрийг устгах (Латин + Кирилл)
-    skip_keywords = ["УЛААНБААТАР", "ULAANBAATAR", "UB", "ХОТ", "HOT", sumname]
-    if sumname in CANON_DISTRICTS:
-        skip_keywords.extend(CANON_DISTRICTS[sumname])
-
-    for k in skip_keywords:
+    # --- remove city + district aliases ---
+    skip = ["УЛААНБААТАР", "ULAANBAATAR", "UB", "ХОТ", "HOT", sumname]
+    skip += CANON_DISTRICTS.get(sumname, [])
+    for k in skip:
         if k:
-            content_area = re.sub(rf"\b{re.escape(str(k))}\b\s*,?", " ", content_area, flags=re.I)
+            content = re.sub(rf"\b{re.escape(k)}\b", " ", content, flags=re.I)
 
-    # 3. Текстийг цэвэрлэх
-    content_area = content_area.replace(",", " ").strip()
-    content_area = re.sub(r"\s+", " ", content_area)
+    content = re.sub(r"\s+", " ", content).strip()
 
-    # 4. Блок салгалт
-    blocks = [p.strip() for p in content_area.split() if re.search(r'\d', p)]
+    # blocks: digit орсон token-ууд
+    blocks = [b for b in content.split() if re.search(r"\d", b)]
 
     bair, korpus, xaalga = 0, "0", 0
-    pat = "none"
+    matched_pattern = "none"
 
+    # ======================================================
+    # ✅ SPECIAL RULE (10-9) зөвхөн ганцхан блок үед!
+    #   Ж: "... 3 10-9"  -> blocks = ["10-9"]
+    #   Харин "... 3 10/5 59" -> blocks = ["10/5","59"] => ЭНД special rule АЖИЛЛАХ ЁСГҮЙ
+    # ======================================================
+    if horooid > 0 and len(blocks) == 1:
+        m = re.match(r"^\s*(\d{1,5})\s*[-./]\s*(\d{1,4})\s*$", blocks[0])
+        if m:
+            bair = int(m.group(1))
+            korpus = "0"
+            xaalga = int(m.group(2))
+            matched_pattern = "bair-xaalga-no-korpus"
+            return {
+                "SUMNAME_PRED": sumname,
+                "HOROOID_PRED": horooid,
+                "BAIR_PRED": bair,
+                "KORPUS_PRED": korpus,
+                "XAALGA_PRED": xaalga,
+                "CONFIDENCE": 0.97,
+                "MATCHED_PATTERN": matched_pattern,
+            }
+
+    # ======================================================
+    # STRICT CONTENT BLOCKS:
+    #   "10/5 59" => bair=10 korpus=5 xaalga=59
+    #   "10 59"   => bair=10 korpus=0 xaalga=59
+    # ======================================================
     if len(blocks) >= 2:
-        b_block = blocks[0]  # ж: "10/5", "10.5", "10-5"
+        first = blocks[0]     # "10/5" эсвэл "10"
+        last = blocks[-1]     # "59" гэх мэт
 
-        bair_match = re.match(r'(\d+)', b_block)
-        if bair_match:
-            bair = int(bair_match.group(1))
+        m = re.match(r"^(\d+)", first)
+        if m:
+            bair = int(m.group(1))
+            rem = first[len(str(bair)):]  # "/5" ".A" гэх мэт
 
-            rem = b_block[len(str(bair)):]  # "/5", ".5", "-5"
+            # korpus дээр тэмдэг хадгалахгүй: "/5" -> "5"
+            korpus = re.sub(r"[^0-9А-ЯӨҮЁA-Z]", "", rem) or "0"
 
-            # ⭐ зөвхөн тоо/үсэг үлдээнэ
-            korpus = re.sub(r"[^0-9А-ЯӨҮЁA-Z]", "", rem)
-            if not korpus:
-                korpus = "0"
+            m2 = re.search(r"\d+", last)
+            if m2:
+                xaalga = int(m2.group())
+                matched_pattern = "strict_content_blocks"
 
-            # хаалга
-            xaalga_match = re.search(r'\d+', blocks[-1])
-            if xaalga_match:
-                xaalga = int(xaalga_match.group())
-                pat = "strict_content_blocks"
+    # ======================================================
+    # FALLBACK
+    # ======================================================
+    if matched_pattern == "none":
+        bair, korpus, xaalga, matched_pattern = _find_building_block_fallback(content)
 
-    if pat == "none":
-        bair, korpus, xaalga, pat = _find_building_block(content_area, horooid)
+    conf = 0.98 if (bair > 0 and xaalga > 0) else 0.0
 
     return {
         "SUMNAME_PRED": sumname,
@@ -211,6 +209,6 @@ def parse_with_rules(text: str):
         "BAIR_PRED": bair,
         "KORPUS_PRED": korpus if korpus else "0",
         "XAALGA_PRED": xaalga,
-        "CONFIDENCE": 0.98 if (bair > 0 and xaalga > 0) else 0.0,
-        "MATCHED_PATTERN": pat,
+        "CONFIDENCE": conf,
+        "MATCHED_PATTERN": matched_pattern,
     }

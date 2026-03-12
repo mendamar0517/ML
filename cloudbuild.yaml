@@ -16,6 +16,7 @@ steps:
         '--image','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA',
         '--region','asia-northeast3',
         '--platform','managed',
+        '--port=8080',
         '--allow-unauthenticated'
       ]
 

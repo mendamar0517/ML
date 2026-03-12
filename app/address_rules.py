@@ -52,7 +52,7 @@ CANON_DISTRICTS = {
         "CHINGELTEI", "CINGELTEI", "CHINGELTE", "CHINGILTEI", "CHINGELTEY", "CHD", "CH" , "CHIN"
     ],
     "СОНГИНОХАЙРХАН": [
-        "СОНГИНОХАЙРХАН", "СОНГНОХАЙРХАН", "СОНГИНОХАРХАН", "СОНГИНХАЙРХАН", "СХД", "СХ",
+        "СОНГИНОХАЙРХАН", "СОНГНОХАЙРХАН", "СОНГИНОХАРХАН", "СОНГИНХАЙРХАН", "СХД", "СХ", "СОН",
         "SONGINOKHAIRKHAN", "SONGINKHAIRKHAN", "SONGINHAIRHAN", "SONGNOKHAIRKHAN",
         "SONGNOHAIRHAN", "SONGINOHAIRHAN", "SKHD", "SHD"
     ],

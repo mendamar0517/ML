@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 5. Кодоо хуулах: Өөрийн байгаа бүх файлыг контейнер руу хуулна
-COPY . .
+COPY app/ ./app/
 
 # 6. Порт нээх: Google Cloud Run-д зориулж 8080 портыг нээнэ
 EXPOSE 8080

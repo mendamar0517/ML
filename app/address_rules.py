@@ -61,7 +61,7 @@ CANON_DISTRICTS = {
         "KHAN-UUL", "KHANUUL", "HAN-UUL", "HANUUL", "HUD", "HANUL", "KHANUL"
     ],
     "НАЛАЙХ": [
-        "НАЛАЙХ", "НАЛАХ", "НД", "Н",
+        "НАЛАЙХ", "НАЛАХ", "НД", "Н", "НАЛ",
         "NALAIKH", "NALAH", "NALAIH", "ND"
     ],
     "БАГАНУУР": [

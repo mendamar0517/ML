@@ -1,0 +1,19 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build','--platform','linux/amd64','-t','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA','.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      [
+        'run','deploy','address-parser',
+        '--image','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA',
+        '--region','asia-northeast3',
+        '--platform','managed',
+        '--allow-unauthenticated'
+      ]
+images:
+  - 'gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA'

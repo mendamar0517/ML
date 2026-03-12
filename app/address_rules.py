@@ -87,7 +87,8 @@ RE_HOROO_SHORT = re.compile(r"\b(\d{1,2})\s*(?:Х|H)\b", re.I)  # 3Х, 3H
 
 # building patterns (fallback)
 RE_BAIR_KORPUS_XAALGA = re.compile(rf"\b(\d{{1,5}})({SEP_CHARS})([А-ЯӨҮЁA-Z]|\d{{1,2}})\s+(\d{{1,4}})\b")
-RE_BAIR_LETTER_XAALGA = re.compile(rf"\b(\d{{1,5}})([А-ЯӨҮЁA-Z])\s+(\d{{1,4}})\b")
+# \s* гэдэг нь хоосон зай байж болно, байхгүй ч байж болно гэсэн үг
+RE_BAIR_LETTER_XAALGA = re.compile(rf"\b(\d{{1,5}})\s*([А-ЯӨҮЁA-Z])\s+(\d{{1,4}})\b", re.I)
 RE_BAIR_XAALGA = re.compile(rf"\b(\d{{1,5}})\s+(\d{{1,4}})\s*(?:{UNIT_WORD})?\b", re.I)
 RE_XAALGA_ONLY = re.compile(rf"(?:\b{UNIT_WORD}\b\s*(\d{{1,4}})\b|\b(\d{{1,4}})\s*{UNIT_WORD}\b)", re.I)
 
@@ -124,6 +125,11 @@ RE_KORPUS_AND_DOOR = re.compile(r"\b(?:КОРПУС|KORPUS|CORPUS)\s*(\d{1,5})\s
 RE_BAIR_IMPLICIT_KORPUS_DOOR = re.compile(r"\b(\d{1,5})\s*(?:БАЙР|BAIR)\b\s+(\d{1,5})\s+(\d{1,5})\b", re.I)
 # reverse: "BAIR 3 4 56"
 RE_BAIR_IMPLICIT_KORPUS_DOOR_REV = re.compile(r"\b(?:БАЙР|BAIR)\s*(\d{1,5})\s+(\d{1,5})\s+(\d{1,5})\b", re.I)
+# "BAIR/4" -> "BAIR 4", "KORPUS-3" -> "KORPUS 3", "TOOT.56" -> "TOOT 56"
+RE_KEYWORD_SEP_NUM = re.compile(
+    r"\b(BAIR|БАЙР|KORPUS|КОРПУС|CORPUS|TOOT|ТООТ|ТОТ|ТОО|Т|№|NO\.?|NO)\s*[-./\\]\s*(\d+)\b",
+    re.I
+)
 
 
 # =========================
@@ -173,14 +179,16 @@ def normalize_address(text: str) -> str:
         return ""
     s = _nfkc_upper(str(text))
     s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+    # 1. Таны хүссэн бүх тусгай тэмдэгтүүдийг зайгаар солих (SEP_CHARS ашиглав)
+    # Үүнд: / , . - ` ~ ; : ' " < > зэрэг орно
+    s = re.sub(rf"{SEP_CHARS}", " ", s)
     s = RE_COMMAS.sub(" ", s)
 
-    # "2BAIR" -> "2 BAIR", "67TOOT" -> "67 TOOT"
+    # 2. Наалдсан түлхүүр үгсийг салгах (2БАЙР -> 2 БАЙР)
     s = RE_NUM_KEYWORD_GLUE.sub(r"\1 \2", s)
-    # "TOOT67" -> "TOOT 67"
     s = RE_KEYWORD_NUM_GLUE.sub(r"\1 \2", s)
-
-    # "56ТООТ" -> "56 ТООТ"
+    s = RE_KEYWORD_SEP_NUM.sub(r"\1 \2", s)
     s = RE_UNIT_GLUE.sub(r"\1 \2", s)
 
     s = RE_SPACES.sub(" ", s).strip()
@@ -248,6 +256,17 @@ def _find_horoo(text: str, district: str) -> int:
 # Building fallback
 # =========================
 def _find_building_block_fallback(text: str) -> Tuple[int, str, int, str]:
+    # Текст доторх бүх цэвэр тоон блокуудыг ялгаж авах
+    blocks = [b.strip() for b in text.split() if re.search(r"\d", b)]
+
+    # Хэрэв яг 3 блок тоо байвал (Жишээ: 34 8 9)
+    if len(blocks) == 3 and all(b.isdigit() for b in blocks):
+        return int(blocks[0]), str(int(blocks[1])), int(blocks[2]), "three_token_fallback"
+
+    # Хэрэв 2 блок тоо байвал (Жишээ: 34 9)
+    if len(blocks) == 2 and all(b.isdigit() for b in blocks):
+        return int(blocks[0]), "0", int(blocks[1]), "two_token_fallback"
+
     m = RE_BAIR_KORPUS_XAALGA.search(text)
     if m:
         bair = int(m.group(1))
@@ -286,17 +305,15 @@ def parse_with_rules(text: str) -> Dict[str, object]:
 
     # --- remove horoo phrase + horoo number ---
     if horooid > 0:
-        # remove "2 HOROO"/"2H" only
         for hp in (
-            rf"\b{horooid}\s*(?:-Р|-R)?\s*(?:ХОРОО|HOROO|KHOROO)\b",
-            rf"\b{horooid}\s*(?:Х|H)\b",
+                rf"\b{horooid}\s*(?:-Р|-R)?\s*(?:ХОРОО|HOROO|KHOROO)\b",
+                rf"\b{horooid}\s*(?:Х|H)\b",
         ):
             content = re.sub(hp, " ", content, flags=re.I)
 
-        # IMPORTANT: do NOT delete horoo number if used as "2 BAIR"/"BAIR 2"/"2 KORPUS"/"KORPUS 2"/"2 TOOT"...
         content = re.sub(
             rf"(?<!\d)\b{horooid}\b"
-            rf"(?!\s*[-./]\s*\d)"  # don't break 1.4, 2/4, 10-9
+            rf"(?!\s*[-./]\s*\d)"
             rf"(?!\s*(?:BAIR|БАЙР|KORPUS|КОРПУС|CORPUS|{UNIT_WORD})\b)",
             " ",
             content,
@@ -316,76 +333,56 @@ def parse_with_rules(text: str) -> Dict[str, object]:
 
     content_u = RE_SPACES.sub(" ", content_u).strip()
 
+    # Инициализаци (Алдаанаас сэргийлж эхэнд зарлаж байна)
     bair, korpus, xaalga = 0, "0", 0
     matched_pattern = "none"
     warnings: List[str] = []
+    keyword_matched = False
 
     # ======================================================
-    # ✅ KEYWORD PARSING (priority)
-    # Supports:
-    #   - "2 BAIR 4 KORPUS 67 TOOT"
-    #   - "BAIR 2 KORPUS 3 TOOT 56"
-    #   - "BAIR 2 3 KORPUS 56"  (door without TOOT)
-    #   - "KORPUS 3 56" => korpus=3, door=56
+    # ✅ KEYWORD PARSING
     # ======================================================
-    # --- implicit keyword case: "3 BAIR 4 56" or "BAIR 3 4 56"
     m_imp = RE_BAIR_IMPLICIT_KORPUS_DOOR.search(content_u) or RE_BAIR_IMPLICIT_KORPUS_DOOR_REV.search(content_u)
+
     if m_imp:
         bair = int(m_imp.group(1))
         korpus = str(int(m_imp.group(2)))
         xaalga = int(m_imp.group(3))
         matched_pattern = "keyword_bair_implicit_korpus_door"
         keyword_matched = True
-
-    # 1) BAIR
-    m_bair = RE_BAIR_WORD.search(content_u) or RE_BAIR_WORD_REV.search(content_u)
-
-    # 2) KORPUS (+ optional door right after it)
-    m_korp_door = RE_KORPUS_AND_DOOR.search(content_u)
-    if m_korp_door:
-        m_korpus = m_korp_door  # group(1)=korpus
-        door_after_korpus = int(m_korp_door.group(2))
     else:
-        m_korpus = RE_KORPUS_WORD.search(content_u) or RE_KORPUS_WORD_REV.search(content_u)
-        door_after_korpus = 0
-
-    # 3) TOOT (door)
-    m_toot = RE_TOOT_WORD.search(content_u) or RE_TOOT_WORD_REV.search(content_u)
-
-    keyword_matched = False
-
-    if m_bair and (m_korpus or m_toot):
-        bair = int(m_bair.group(1))
-
-        if m_korpus:
-            korpus = str(int(m_korpus.group(1)))
+        # 1) BAIR
+        m_bair = RE_BAIR_WORD.search(content_u) or RE_BAIR_WORD_REV.search(content_u)
+        # 2) KORPUS
+        m_korp_door = RE_KORPUS_AND_DOOR.search(content_u)
+        if m_korp_door:
+            m_korpus = m_korp_door
+            door_after_korpus = int(m_korp_door.group(2))
         else:
-            korpus = "0"
+            m_korpus = RE_KORPUS_WORD.search(content_u) or RE_KORPUS_WORD_REV.search(content_u)
+            door_after_korpus = 0
+        # 3) TOOT
+        m_toot = RE_TOOT_WORD.search(content_u) or RE_TOOT_WORD_REV.search(content_u)
 
-        if m_toot:
-            xaalga = int(m_toot.group(1))
-        elif door_after_korpus > 0:
-            # e.g. "KORPUS 3 56"
-            xaalga = door_after_korpus
-        else:
-            # last fallback in keyword-mode: trailing number
-            nums = [int(x) for x in re.findall(r"\b\d{1,5}\b", content_u)]
-            cand = nums[-1] if nums else 0
-            if cand and cand != bair and str(cand) != korpus:
-                xaalga = cand
+        if m_bair and (m_korpus or m_toot):
+            bair = int(m_bair.group(1))
+            korpus = str(int(m_korpus.group(1))) if m_korpus else "0"
+            if m_toot:
+                xaalga = int(m_toot.group(1))
+            elif door_after_korpus > 0:
+                xaalga = door_after_korpus
             else:
-                xaalga = 0
-
-        matched_pattern = "keyword_bair_korpus_toot"
-        keyword_matched = True
-
-    # allow: "KORPUS 3 56" without BAIR
-    elif (not m_bair) and m_korp_door:
-        bair = 0
-        korpus = str(int(m_korp_door.group(1)))
-        xaalga = int(m_korp_door.group(2))
-        matched_pattern = "keyword_korpus_door"
-        keyword_matched = True
+                nums = [int(x) for x in re.findall(r"\b\d{1,5}\b", content_u)]
+                cand = nums[-1] if nums else 0
+                xaalga = cand if (cand and cand != bair and str(cand) != korpus) else 0
+            matched_pattern = "keyword_bair_korpus_toot"
+            keyword_matched = True
+        elif m_korp_door:
+            bair = 0
+            korpus = str(int(m_korp_door.group(1)))
+            xaalga = int(m_korp_door.group(2))
+            matched_pattern = "keyword_korpus_door"
+            keyword_matched = True
 
     # ======================================================
     # Other logic if keyword not matched
@@ -394,7 +391,6 @@ def parse_with_rules(text: str) -> Dict[str, object]:
         raw_blocks = [b.strip(" ,.;") for b in content_u.split() if re.search(r"\d", b)]
         blocks = [b for b in raw_blocks if b]
 
-        # ✅ SPECIAL RULE (10-9) when it's the ONLY numeric block after horoo
         if horooid > 0 and len(blocks) == 1:
             m = RE_BAIR_XAALGA_TOKEN.match(blocks[0])
             if m:
@@ -403,35 +399,65 @@ def parse_with_rules(text: str) -> Dict[str, object]:
                 xaalga = int(m.group(2))
                 matched_pattern = "bair-xaalga-no-korpus"
 
-        # STRICT CONTENT BLOCKS:
         if matched_pattern == "none" and len(blocks) >= 2:
-            first = blocks[0]
-            last = blocks[-1]
+            if len(blocks) == 3 and all(b.isdigit() for b in blocks):
+                bair = int(blocks[0])
+                korpus = str(int(blocks[1]))
+                xaalga = int(blocks[2])
+                matched_pattern = "strict_three_blocks"
+            else:
+                first = blocks[0]
+                last = blocks[-1]
+                m = re.match(r"^(\d+)", first)
+                if m:
+                    bair = int(m.group(1))
+                    rem = first[len(str(bair)):]
+                    korpus = _korpus_clean(rem)
+                    m2 = re.search(r"\d+", last)
+                    if m2:
+                        xaalga = int(m2.group())
+                        matched_pattern = "strict_content_blocks"
 
-            m = re.match(r"^(\d+)", first)
-            if m:
-                bair = int(m.group(1))
-                rem = first[len(str(bair)):]
-                korpus = _korpus_clean(rem)
-
-                m2 = re.search(r"\d+", last)
-                if m2:
-                    xaalga = int(m2.group())
-                    matched_pattern = "strict_content_blocks"
-
-        # FALLBACK
         if matched_pattern == "none":
             bair, korpus, xaalga, matched_pattern = _find_building_block_fallback(content_u)
 
-    # Range validation + confidence
+    # Range validation
     horooid, bair, xaalga, warns = _clamp_ranges(horooid, bair, xaalga)
     warnings.extend(warns)
 
-    # Confidence strategy
+    # --- Хот/Аймаг таних ---
+    city_name = ""
+    city_keywords = ["УБ", "УЛААНБААТАР", "ULAANBAATAR", "UB", "ХОТ", "HOT"]
+    for ck in city_keywords:
+        if re.search(rf"\b{ck}\b", norm, re.I):
+            city_name = "УЛААНБААТАР"
+            break
+
+    # --- Хотхоны нэр ялгах ---
+    village_name = ""
+    rem_text = content_u
+    for ck in city_keywords:
+        rem_text = re.sub(rf"\b{ck}\b", " ", rem_text, flags=re.I)
+
+    # Байр, корпус, хаалгыг наалдсан болон тусдаа байхаар хасах
+    if bair > 0 and korpus != "0":
+        rem_text = re.sub(rf"\b{bair}\s*[-./]?\s*{korpus}\b", " ", rem_text, flags=re.I)
+    if bair > 0:
+        rem_text = re.sub(rf"\b{bair}\b", " ", rem_text)
+    if xaalga > 0:
+        rem_text = re.sub(rf"\b{xaalga}\b", " ", rem_text)
+    if korpus != "0":
+        rem_text = re.sub(rf"\b{korpus}\b", " ", rem_text, flags=re.I)
+
+    junk_words = ["БАЙР", "BAIR", "КОРПУС", "KORPUS", "ТООТ", "TOOT", "ДҮГЭЭР", "ДУГААР", "Р", "R"]
+    for jw in junk_words:
+        rem_text = re.sub(rf"\b{jw}\b", " ", rem_text, flags=re.I)
+    village_name = RE_SPACES.sub(" ", rem_text).strip()
+
+    # --- Confidence strategy ---
+    conf = 0.0
     if bair > 0 and xaalga > 0:
-        conf = 0.98
-        if matched_pattern in ("keyword_bair_korpus_toot",):
-            conf = 0.99
+        conf = 0.99 if matched_pattern == "keyword_bair_korpus_toot" else 0.98
         if matched_pattern == "bair-xaalga-no-korpus":
             conf = 0.97
     elif matched_pattern == "xaalga only" and xaalga > 0:
@@ -441,15 +467,38 @@ def parse_with_rules(text: str) -> Dict[str, object]:
         conf = 0.70
         warnings.append("partial_no_bair")
     else:
-        conf = 0.0
         warnings.append("not_enough_info")
 
+    parts = []
+    if city_name:
+        parts.append(f"{city_name.capitalize()} хот")
+    if sumname:
+        suffix = "дүүрэг"
+        parts.append(f"{sumname.capitalize()} {suffix}")
+    if horooid > 0:
+        parts.append(f"{horooid}-р хороо")
+    if village_name:
+        parts.append(village_name.title())  # Хотхоны нэрийг Title case-ээр
+    if bair > 0:
+        if korpus != "0":
+            bair_val = f"{bair}-{korpus}"
+        else:
+            bair_val = f"{bair}"
+        parts.append(f"{bair_val}-р байр")
+    if xaalga > 0:
+        parts.append(f"{xaalga} тоот")
+
+    formatted_address = ", ".join(parts)
+
     return {
+        "CITY_PRED": city_name,
         "SUMNAME_PRED": sumname,
         "HOROOID_PRED": int(horooid or 0),
+        "VILLAGE_PRED": village_name,
         "BAIR_PRED": int(bair or 0),
         "KORPUS_PRED": str(korpus or "0"),
         "XAALGA_PRED": int(xaalga or 0),
+        "FORMATTED_ADDRESS": formatted_address,
         "CONFIDENCE": float(conf),
         "MATCHED_PATTERN": matched_pattern,
         "RULES_VERSION": RULES_VERSION,

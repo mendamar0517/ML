@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+pydantic
+unicodedata2
+google-generativeai

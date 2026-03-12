@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from schemas import ParseRequest, ParseResponse
-from address_rules import normalize_address, parse_with_rules
+from .schemas import ParseRequest, ParseResponse
+from .address_rules import normalize_address, parse_with_rules
 
 app = FastAPI(title="Address Parser Service", version="1.0.0")
 

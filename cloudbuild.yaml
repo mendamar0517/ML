@@ -3,7 +3,7 @@ options:
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build','--platform','linux/amd64','-t','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA','./app']
+    args: ['build','--platform','linux/amd64','-t','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA','.']
 
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push','gcr.io/$PROJECT_ID/address-parser:$COMMIT_SHA']

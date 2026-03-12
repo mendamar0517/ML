@@ -48,8 +48,8 @@ CANON_DISTRICTS = {
         "SUKHBAATAR", "SUKHBATAR", "SUHBATAR", "SUHBAATAR", "SBD", "SB" , "SUH" , "SVH"
     ],
     "ЧИНГЭЛТЭЙ": [
-        "ЧИНГЭЛТЭЙ", "ЧИНГИЛТЭЙ", "ЧЭНГЭЛТЭЙ", "ЧИНГЭЛТЙ", "ЧИНГИЛТЭ", "ЧИНГЭЛТЭ", "ЧД", "Ч",
-        "CHINGELTEI", "CINGELTEI", "CHINGELTE", "CHINGILTEI", "CHINGELTEY", "CHD", "CH"
+        "ЧИНГЭЛТЭЙ", "ЧИНГИЛТЭЙ", "ЧЭНГЭЛТЭЙ", "ЧИНГЭЛТЙ", "ЧИНГИЛТЭ", "ЧИНГЭЛТЭ", "ЧД", "Ч", "ЧИН",
+        "CHINGELTEI", "CINGELTEI", "CHINGELTE", "CHINGILTEI", "CHINGELTEY", "CHD", "CH" , "CHIN"
     ],
     "СОНГИНОХАЙРХАН": [
         "СОНГИНОХАЙРХАН", "СОНГНОХАЙРХАН", "СОНГИНОХАРХАН", "СОНГИНХАЙРХАН", "СХД", "СХ",

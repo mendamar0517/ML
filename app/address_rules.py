@@ -16,7 +16,7 @@ Address parsing rules (Mongolia / UB districts) - production-ready improvements:
     * "10-9" (single token after horoo) => bair=10 korpus=0 xaalga=9
     * "44 50 ТООТ" => bair=44 korpus=0 xaalga=50
 - Korpus keeps only [0-9A-ZА-ЯӨҮЁ] (no '/', '.', etc)
-- Range validation + confidence adjustment
+- Range validation + confidence adjustment,,,,,
 """
 
 import re
